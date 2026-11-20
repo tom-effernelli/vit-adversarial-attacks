@@ -1,49 +1,50 @@
-# Attaquer un Vision Transformer avec FGSM et PGD
+# Adversarial Attacks on a Vision Transformer (FGSM & PGD)
 
-Ce mini-projet **attaque** un classifieur ViT entraîné sur CIFAR-10. Il ne réentraîne pas le modèle et n'implémente aucune défense. Il compare des perturbations aléatoires, FGSM et PGD sous la même limite de variation par pixel, puis mesure le changement d'une représentation interne.
+This small project **attacks** a ViT classifier fine-tuned on CIFAR-10. It does not retrain the model and implements no defense. It compares random noise, FGSM and PGD under the same per-pixel budget, then measures how an internal representation of the model changes.
 
-## Les quatre idées du code
+## What the code does
 
-1. **Objectif.** Pour une image `x` et sa vraie classe `y`, maximiser la cross-entropy `L(model(x), y)` augmente la difficulté de classification. La réussite est mesurée séparément par le changement de prédiction.
-2. **FGSM.** `x_adv = clip_[0,1](x + ε sign(∇_x L))`. Une seule passe de gradient depuis l'image originale.
-3. **PGD.** Répéter `x_{t+1} = projection_[x-ε,x+ε](x_t + α sign(∇_{x_t} L))`. Le gradient est recalculé après chaque pas ; `α` est la taille d'un pas, `ε` la limite totale depuis `x`.
-4. **Hook.** Un `forward_hook` sur le dernier bloc du ViT récupère le vecteur `[CLS]`. Sa distance relative à la représentation de l'image originale est une mesure descriptive, pas une preuve que ce changement cause l'erreur.
-5. **Lien changement interne ↔ erreur.** Toutes les images attaquées (aléatoire, FGSM, PGD) sont regroupées : on compare la dérive moyenne du `[CLS]` des images trompées et des images restées correctes, et on calcule la corrélation de Spearman entre dérive et loss. Le nuage de points est sauvé dans `drift_vs_loss.png`.
+1. **Objective.** For an image `x` with true class `y`, maximizing the cross-entropy `L(model(x), y)` makes the image harder to classify. Attack success is measured separately, as a change of the predicted class.
+2. **FGSM.** `x_adv = clip_[0,1](x + ε · sign(∇_x L))`: a single gradient step from the original image.
+3. **PGD.** Repeat `x_{t+1} = proj_[x−ε, x+ε](x_t + α · sign(∇_{x_t} L))`. The gradient is recomputed after every step; `α` is the step size and `ε` the total budget around `x`.
+4. **Hook.** A `forward_hook` on the last ViT block reads the `[CLS]` vector. Its relative distance to the clean image's representation is a descriptive measure, not proof that this change causes the error.
+5. **Internal change vs. error.** All attacked images (random, FGSM, PGD) are pooled: the mean `[CLS]` drift of fooled images is compared with that of images that stay correct, and the Spearman correlation between drift and loss is computed. The scatter plot is saved to `drift_vs_loss.png`.
 
-Toutes les attaques sont *white-box* : elles utilisent les gradients du modèle cible. Le modèle est en mode évaluation et ses paramètres sont gelés ; les gradients remontent uniquement jusqu'aux pixels. Les attaques agissent sur les images CIFAR-10 **après agrandissement à 224×224**, mais avant la normalisation du modèle. `ε=8/255` est donc exprimé dans cet espace de pixels `[0,1]`.
+All attacks are *white-box*: they use the target model's gradients. The model is in eval mode with frozen parameters, so gradients only flow back to the pixels. Attacks act on CIFAR-10 images **after resizing to 224×224**, but before the model's normalization, so `ε = 8/255` is expressed in that `[0,1]` pixel space.
 
-## Exécution
+## Running it
 
-Python 3.10+ et un environnement pouvant installer PyTorch sont nécessaires. Le premier lancement télécharge CIFAR-10 et les poids du modèle [`nateraw/vit-base-patch16-224-cifar10`](https://huggingface.co/nateraw/vit-base-patch16-224-cifar10), entraîné pour ce jeu de données.
+Requires Python 3.10+ and an environment that can install PyTorch. The first run downloads CIFAR-10 images and the weights of [`nateraw/vit-base-patch16-224-cifar10`](https://huggingface.co/nateraw/vit-base-patch16-224-cifar10), a ViT fine-tuned on this dataset.
 
-```powershell
+```bash
 python -m venv .venv
-.venv\Scripts\Activate.ps1
+source .venv/bin/activate        # Windows: .venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-python experiment.py --samples 16 --steps 10
+python test_attacks.py           # sanity checks on a toy model
+python experiment.py --samples 32 --steps 10
 ```
 
-Sur une machine sans GPU, commencez par `--samples 4 --steps 2` pour vérifier le pipeline ; une expérience plus grande peut être lente. `--data-dir` et `--out-dir` permettent de choisir où écrire les téléchargements et résultats.
+On a machine without a GPU, start with `--samples 4 --steps 2` to check the pipeline; larger runs can be slow. `--data-dir` and `--out-dir` choose where downloads and results are written.
 
-Par défaut, `--source quick` récupère les premières images du jeu de test CIFAR-10 via [Hugging Face Datasets](https://huggingface.co/datasets/uoft-cs/cifar10), ce qui évite le téléchargement intégral de 170 Mo. Les images et labels sont mis en cache dans `--data-dir` : les lancements suivants n'ont plus besoin du réseau. Pour une évaluation plus large, `--source full` utilise le téléchargement complet de `torchvision`. Le programme écrit `summary.json` (taux de réussite sur les exemples initialement corrects), `per_image.csv` (résultats individuels) et `examples.png` (comparaison visuelle). Le bruit aléatoire est borné par le même `ε` que FGSM et PGD.
+By default, `--source quick` fetches the first CIFAR-10 test images from [Hugging Face Datasets](https://huggingface.co/datasets/uoft-cs/cifar10), which avoids downloading the full 170 MB archive. Images and labels are cached in `--data-dir`, so later runs need no network. For a larger evaluation, `--source full` uses torchvision's full download. The script writes `summary.json` (success rates on initially correct images), `per_image.csv` (per-image results), `examples.png` (visual comparison) and `drift_vs_loss.png`.
 
-## Résultats (32 images, ε = 8/255, PGD 10 pas de 2/255, CPU)
+## Results (32 images, ε = 8/255, PGD 10 steps of 2/255, CPU)
 
-Commande : `python experiment.py --samples 32 --steps 10`. Seules les images que le modèle classait correctement au départ sont attaquées.
+Command: `python experiment.py --samples 32 --steps 10`. Only images the model initially classified correctly are attacked.
 
-| Perturbation (même budget ε) | Taux de réussite | Loss moyenne | Dérive relative moyenne du `[CLS]` |
+| Perturbation (same ε budget) | Success rate | Mean loss | Mean relative `[CLS]` drift |
 |---|---:|---:|---:|
-| Bruit aléatoire | 3 % (1/32) | 0,12 | 0,38 |
-| FGSM (1 pas) | 75 % (24/32) | 3,73 | 1,10 |
-| PGD (10 pas) | **100 %** (32/32) | 7,76 | 1,53 |
+| Random noise | 3% (1/32) | 0.12 | 0.38 |
+| FGSM (1 step) | 75% (24/32) | 3.73 | 1.10 |
+| PGD (10 steps) | **100%** (32/32) | 7.76 | 1.53 |
 
-### Les images avant et après attaque
+### Images before and after the attack
 
-Chaque ligne est une image du jeu de test ; chaque colonne utilise **le même budget** (au plus 8/255 par pixel). En rouge : prédiction fausse. La dernière colonne montre la perturbation PGD **amplifiée** (gris = pixel inchangé) : à l'échelle normale, elle est invisible.
+Each row is a test image; every column uses **the same budget** (at most 8/255 per pixel). Red means a wrong prediction. The last column shows the PGD perturbation **magnified** (grey = unchanged pixel): at normal scale it is invisible.
 
-![Images avant et après attaque](results/examples.png)
+![Images before and after the attack](results/examples.png)
 
-| Vraie classe | Bruit aléatoire | FGSM | PGD |
+| True class | Random noise | FGSM | PGD |
 |---|---|---|---|
 | cat | cat ✓ | cat ✓ | **dog** ✗ |
 | ship | ship ✓ | ship ✓ | **automobile** ✗ |
@@ -52,20 +53,24 @@ Chaque ligne est une image du jeu de test ; chaque colonne utilise **le même bu
 | automobile | automobile ✓ | **dog** ✗ | **dog** ✗ |
 | frog | frog ✓ | **dog** ✗ | **cat** ✗ |
 
-Le détail des 32 images est dans `results/per_image.csv`. Une observation au passage : les attaques poussent surtout vers **chien** et **chat** (19 des 32 images trompées par PGD). Je ne l'ai pas analysé plus loin ; ce serait une piste pour une extension (attaque ciblée vers une classe choisie).
+All 32 images are in `results/per_image.csv`. A side observation: the attacks mostly push images towards **dog** and **cat** (19 of the 32 images fooled by PGD). I have not analyzed this further; a targeted attack towards a chosen class would be a natural extension.
 
-### Ce que montrent les chiffres
+### What the numbers show
 
-- **Le bruit aléatoire ne fait presque rien, FGSM trompe 3 images sur 4 et PGD toutes**, avec la même amplitude maximale par pixel. Ce n'est donc pas la taille de la perturbation qui compte, mais sa **direction** : alignée avec le gradient, elle est efficace ; aléatoire, ses effets se compensent (l'argument « n contre √n » de Goodfellow et al.).
-- PGD fait mieux que FGSM parce qu'il recalcule le gradient à chaque pas : la linéarisation de FGSM n'est valable que localement.
-- **Changement interne ↔ erreur** (96 images attaquées, toutes méthodes confondues) : dérive moyenne de **1,39** quand le modèle est trompé contre **0,43** quand il reste correct ; corrélation de Spearman dérive/loss **0,95**. Voir `results/drift_vs_loss.png`.
-- Attention en lisant ce chiffre : une grande partie de la corrélation vient du fait qu'on regroupe trois méthodes de force différente. Mais la relation se voit aussi **à l'intérieur de FGSM seul** sur le graphique (les carrés restés corrects ont une dérive plus faible que les carrés trompés).
+- **Random noise does almost nothing, FGSM fools 3 images out of 4, and PGD fools all of them**, with the same maximum change per pixel. What matters is not the size of the perturbation but its **direction**: aligned with the gradient, it is effective; random, its effects cancel out (the "n vs. √n" argument of Goodfellow et al.).
+- PGD beats FGSM because it recomputes the gradient at every step: FGSM's linearization only holds locally.
+- **Internal change vs. error** (96 attacked images, all methods pooled): mean drift of **1.39** when the model is fooled vs. **0.43** when it stays correct; Spearman correlation between drift and loss **0.95**.
 
-## Ce que l'expérience ne prouve pas
+![Internal drift vs. loss](results/drift_vs_loss.png)
 
-- Un échec de PGD avec ces paramètres ne prouve pas qu'aucune attaque n'existe. Pour évaluer sérieusement la robustesse, il faudrait notamment varier le nombre de pas, la taille des pas et les départs aléatoires.
-- La distance du vecteur `[CLS]` montre un changement interne, pas sa cause ni son utilité à elle seule. Le taux d'erreur est mesuré séparément.
-- 32 images, c'est peu : les pourcentages ont une forte incertitude (un seul exemple représente environ 3 points). `--source full --samples 500` donnerait des chiffres plus solides, au prix d'un calcul plus long sur CPU.
-- Ce projet traite des images et ne démontre pas l'optimisation discrète de tokens de texte ni la robustesse d'un LLM de code.
+- A caveat on that number: much of the correlation comes from pooling three methods of very different strength. The relation is also visible **within FGSM alone** on the plot, where the squares that stay correct have lower drift than the fooled ones.
 
-Références : [Goodfellow et al. (FGSM)](https://arxiv.org/abs/1412.6572), [Madry et al. (PGD)](https://arxiv.org/abs/1706.06083), [carte du modèle ViT](https://huggingface.co/nateraw/vit-base-patch16-224-cifar10).
+## What this experiment does not show
+
+- PGD failing with given settings would not prove that no attack exists. A serious robustness evaluation would vary the number of steps, step size and random restarts.
+- The `[CLS]` distance shows an internal change, not its cause. Error rates are measured separately.
+- 32 images is a small sample: the percentages are uncertain (one image is about 3 points). `--source full --samples 500` would give more reliable numbers, at the cost of a longer run on CPU.
+- The perturbation is applied to the image **upscaled to 224×224**, not to the original 32×32 CIFAR image. That gives the attacker more freedom than standard CIFAR-10 benchmarks; to compare with the literature, the perturbation should be applied at 32×32 with the resizing inside the gradient computation.
+- This project is about images. It does not demonstrate discrete token optimization or the robustness of a code LLM.
+
+References: [Goodfellow et al., 2014 (FGSM)](https://arxiv.org/abs/1412.6572), [Madry et al., 2017 (PGD)](https://arxiv.org/abs/1706.06083), [ViT model card](https://huggingface.co/nateraw/vit-base-patch16-224-cifar10).
