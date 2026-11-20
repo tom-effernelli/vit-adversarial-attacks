@@ -1,0 +1,33 @@
+{
+  "model": "nateraw/vit-base-patch16-224-cifar10",
+  "dataset": "CIFAR-10 test set (quick source); only initially correct examples retained",
+  "pixel_space": "224x224 resized RGB, each channel in [0,1] before normalization",
+  "n": 32,
+  "epsilon": 0.03137254901960784,
+  "pgd_step_size": 0.00784313725490196,
+  "pgd_steps": 10,
+  "seed": 42,
+  "results": {
+    "random": {
+      "attack_success_rate": 0.03125,
+      "mean_loss": 0.12136152386665344,
+      "mean_relative_cls_drift": 0.37742621125653386
+    },
+    "fgsm": {
+      "attack_success_rate": 0.75,
+      "mean_loss": 3.734473943710327,
+      "mean_relative_cls_drift": 1.0965885017067194
+    },
+    "pgd": {
+      "attack_success_rate": 1.0,
+      "mean_loss": 7.759458065032959,
+      "mean_relative_cls_drift": 1.526418399065733
+    }
+  },
+  "drift_vs_error": {
+    "n_attacked_images": 96,
+    "mean_drift_when_fooled": 1.3890375777294761,
+    "mean_drift_when_still_correct": 0.43176199113711333,
+    "spearman_drift_vs_loss": 0.9456456863809007
+  }
+}
